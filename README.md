@@ -94,6 +94,15 @@ Die Board-Definition `distancer` liegt in diesem Repository unter
 mit `board_root: .` an — deshalb findet `west build -b distancer` das Board
 automatisch, ohne dass man `-DBOARD_ROOT=…` angeben muss.
 
+Damit das auch dann funktioniert, wenn das Repo *nicht* als Zephyr-Modul
+registriert ist — also bei einem einfachen `git clone` in einen bereits
+bestehenden west-Workspace —, setzen zusätzlich
+[`CMakeLists.txt`](CMakeLists.txt) und
+[`sysbuild/CMakeLists.txt`](sysbuild/CMakeLists.txt) `BOARD_ROOT` auf dieses
+Verzeichnis. Beide Stellen sind nötig: ohne sysbuild ist `CMakeLists.txt` der
+Einstiegspunkt, mit `--sysbuild` löst sysbuild das Board in einem eigenen
+CMake-Scope auf, bevor es überhaupt in die Applikation absteigt.
+
 ### 3. Bauen
 
 ```bash
