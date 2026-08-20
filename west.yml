@@ -1,0 +1,48 @@
+# West manifest for the distancer iBeacon firmware (T2 "workspace application"
+# topology). This repository is the manifest repository of its own west
+# workspace; Zephyr and its modules are imported below and managed by west as
+# sibling projects.
+#
+#   west init -m https://github.com/MPodolszki/distancer-beacon.git ws
+#   cd ws && west update
+#   cd distancer-beacon && west build -b distancer .
+#
+# SPDX-License-Identifier: Apache-2.0
+
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      # Pinned to the revision this firmware was built and tested against
+      # (v4.4.0-11924-gd316f0266f6d). Bump this to move to a newer Zephyr.
+      revision: d316f0266f6d9c742b4d20d50b4b38c0ce89c210
+      import:
+        # Import Zephyr's module set (HALs, mcuboot, mbedtls, ...) but skip the
+        # HALs for vendors this board does not use - they only cost disk and
+        # download time.
+        name-blocklist:
+          - hal_altera
+          - hal_espressif
+          - hal_gigadevice
+          - hal_infineon
+          - hal_microchip
+          - hal_nuvoton
+          - hal_nxp
+          - hal_openisa
+          - hal_quicklogic
+          - hal_renesas
+          - hal_rpi_pico
+          - hal_silabs
+          - hal_st
+          - hal_stm32
+          - hal_telink
+          - hal_ti
+          - hal_wch
+          - hal_xtensa
+
+  self:
+    path: distancer-beacon

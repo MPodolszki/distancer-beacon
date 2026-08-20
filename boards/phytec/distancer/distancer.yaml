@@ -1,0 +1,18 @@
+identifier: distancer
+name: PHYTEC distancer
+type: mcu
+arch: arm
+toolchain:
+  - zephyr
+  - gnuarmemb
+ram: 64
+flash: 512
+supported:
+  - gpio
+  - i2c
+  - spi
+  - pwm
+  - adc
+  - ble
+  - watchdog
+vendor: phytec

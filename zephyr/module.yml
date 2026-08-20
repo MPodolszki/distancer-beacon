@@ -1,0 +1,6 @@
+# Declares this repository as a Zephyr module so that its out-of-tree board
+# (boards/phytec/distancer) is discovered automatically. This lets
+# `west build -b distancer` work without passing -DBOARD_ROOT.
+build:
+  settings:
+    board_root: .

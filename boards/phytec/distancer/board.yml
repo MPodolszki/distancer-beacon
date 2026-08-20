@@ -1,0 +1,6 @@
+board:
+  name: distancer
+  full_name: PHYTEC distancer (rev 3)
+  vendor: phytec
+  socs:
+    - name: nrf52832
