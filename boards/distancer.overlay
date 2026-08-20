@@ -1,0 +1,23 @@
+/*
+ * Copyright (c) 2026 PHYTEC Messtechnik GmbH
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Board fix-up for the iBeacon application.
+ */
+
+/ {
+	/*
+	 * On the rev 3 hardware the battery sense line runs straight into the
+	 * ADC - the 1.5 M / 180 k divider described in the board devicetree is
+	 * not populated. Measured on the target: the ADC pin reads the battery
+	 * voltage itself (3162 mV), which the 9.33x divider scaling turned into
+	 * an impossible 29.5 V.
+	 *
+	 * Setting full-ohms equal to output-ohms makes the scaling a no-op, so
+	 * battery.c reports the measured voltage unchanged.
+	 */
+	vbatt {
+		full-ohms = <180000>;
+	};
+};
