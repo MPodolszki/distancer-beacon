@@ -1,0 +1,224 @@
+# distancer-beacon
+
+iBeacon-Firmware für das PHYTEC *distancer*-Board (nRF52832), gebaut mit Zephyr.
+
+Das Gerät sendet dauerhaft eine Apple-iBeacon-Advertisement aus. Es öffnet
+selbst **keine** Tür: ein Empfänger (z. B. die Home-Assistant-iOS-App, die eine
+iBeacon-Zone überwacht) erkennt den Beacon an UUID/Major/Minor und löst das
+Schloss aus. Zusätzlich meldet die Firmware ihren Akkustand per
+[BTHome v2](https://bthome.io/), das Home Assistant ohne Verbindung und ohne
+Zusatzintegration als Batteriesensor erkennt.
+
+Eckdaten:
+
+| | |
+|---|---|
+| MCU | nRF52832 (Board `distancer`, rev 3) |
+| Advertising-Intervall | 150–200 ms |
+| Proximity UUID | `18ee1516-016b-4bec-ad96-bcb96d166e97` |
+| Major / Minor | 1 / 1 |
+| Kalibrierter RSSI @ 1 m | `0xC6` = −58 dBm bei 0 dBm Sendeleistung |
+| Batteriemeldung | BTHome v2, Messung alle 60 s, Sendung bei Änderung (Keep-alive 5 min) |
+| Stromversorgung | NiMH-Pack, Ladung über LTC4060 (Micro-USB) |
+
+---
+
+## Bauen — Schritt für Schritt
+
+Wer noch nie Zephyr gebaut hat, arbeitet diese Abschnitte einfach von oben nach
+unten ab. Getestet unter Linux; unter macOS/Windows gelten dieselben Schritte,
+nur die Paketnamen unterscheiden sich.
+
+### 0. Was man dafür braucht
+
+* Linux (getestet: Manjaro), Python ≥ 3.10, Git
+* das **distancer-Board** samt DAPLink-Debug-Probe (on-board, meldet sich als
+  `0d28:0204 NXP ARM mbed`)
+* Zugriff auf das interne Repository `distancer-dev`
+  (`ssh://git@git.phytec.de/distancer-dev`) — siehe Schritt 2, ohne das geht es
+  nicht
+
+### 1. Zephyr-Toolchain installieren
+
+Einmalig, nach der offiziellen Anleitung:
+<https://docs.zephyrproject.org/latest/develop/getting_started/index.html>
+
+Kurzfassung — Systempakete installieren, dann ein Python-venv mit `west` und
+das Zephyr-SDK:
+
+```bash
+python3 -m venv ~/zephyrproject/.venv
+source ~/zephyrproject/.venv/bin/activate
+pip install west pyocd
+```
+
+Das Zephyr-SDK (Cross-Compiler für ARM) installiert man wie in der Anleitung
+beschrieben mit `west sdk install` bzw. dem SDK-Bundle. Ohne SDK bricht der
+Build mit „toolchain not found" ab.
+
+**Wichtig:** Vor *jedem* Build das venv aktivieren:
+
+```bash
+source ~/zephyrproject/.venv/bin/activate
+```
+
+### 2. Workspace anlegen
+
+Diese Firmware ist eine *Zephyr-Workspace-Anwendung*: sie bringt Zephyr nicht
+selbst mit, sondern lebt neben einem von west verwalteten Zephyr-Baum. Die
+Board-Definition `distancer` steckt außerdem im internen Repository
+`distancer-dev`, das gleichzeitig das west-Manifest stellt.
+
+```bash
+mkdir -p ~/git/distancer-workspace && cd ~/git/distancer-workspace
+git clone ssh://git@git.phytec.de/distancer-dev
+west init -l distancer-dev        # macht distancer-dev zum Manifest-Repo
+west update                       # lädt Zephyr + Module (dauert ein paar Minuten)
+west config build.sysbuild true   # sysbuild aktivieren (wie im Original-Workspace)
+git clone git@github.com:MPodolszki/distancer-beacon.git ibeacon
+```
+
+Danach sieht der Workspace so aus:
+
+```
+distancer-workspace/
+├── .west/            # west-Konfiguration
+├── distancer-dev/    # Manifest-Repo, enthält boards/phytec/distancer
+├── zephyr/           # von west geholt
+├── modules/          # von west geholt
+└── ibeacon/          # ← dieses Repository
+```
+
+`distancer-dev` meldet sich über `zephyr/module.yml` als Zephyr-Modul mit
+`board_root: .` an — deshalb findet `west build -b distancer` das Board
+automatisch, ohne dass man `-DBOARD_ROOT=…` angeben muss.
+
+Wer das Repository woanders auschecken will, muss stattdessen den Board-Pfad
+explizit mitgeben:
+
+```bash
+west build -b distancer . -- -DBOARD_ROOT=/pfad/zu/distancer-dev
+```
+
+### 3. Bauen
+
+```bash
+source ~/zephyrproject/.venv/bin/activate
+cd ~/git/distancer-workspace/ibeacon
+west build -b distancer .
+```
+
+Ergebnis: `build/ibeacon/zephyr/zephyr.hex`.
+
+Nach Konfigurationsänderungen (`prj.conf`, Overlay) sicherheitshalber neu
+aufsetzen:
+
+```bash
+west build -b distancer . --pristine
+```
+
+### 4. Flashen
+
+Der Debug-Probe auf dem Board ist ein DAPLink/CMSIS-DAP, deshalb **immer**
+pyocd angeben — der Default-Runner ist J-Link und schlägt mit
+`required program JLinkExe not found` fehl:
+
+```bash
+west flash --runner pyocd
+```
+
+Oder an west vorbei:
+
+```bash
+pyocd flash -e sector -t nrf52832 build/ibeacon/zephyr/zephyr.hex
+```
+
+Vorher prüfen, ob der Probe überhaupt da ist:
+
+```bash
+pyocd list                      # erwartet: ARM DAPLink CMSIS-DAP
+pyocd cmd -t nrf52832 -c reg    # "Core is not halted" = Verbindung steht
+```
+
+### Wenn das Flashen fehlschlägt
+
+`SWD/JTAG communication failure (No ACK)` heißt fast immer: der Probe wird
+erkannt, **der Target-MCU hat aber keinen Strom oder schläft**. An den
+Clock-/Connect-Flags zu drehen hilft nicht. Stattdessen:
+
+1. Board einschalten, Akku laden bzw. Ladekabel anstecken.
+2. Das Gerät fährt per Power-Button in System OFF herunter — vorher mit dem
+   Button aufwecken oder das Ladegerät anstecken.
+3. USB-Kabel/Port wechseln.
+4. Letzter Ausweg: `pyocd erase --chip -t nrf52832` (löscht auch die
+   APPROTECT-Sperre, danach ist der Flash leer).
+
+Der DAPLink meldet sich zusätzlich als USB-Massenspeicher — dessen
+Volume-Name (`reel-board`) taugt **nicht** zur Board-Identifikation, PHYTEC
+nutzt dieselbe DAPLink-Kennung über mehrere Boards hinweg.
+
+---
+
+## Bedienung
+
+**Tasten**
+
+| Taste | Funktion |
+|---|---|
+| Ein/Aus (`P0.09`) | 2 s halten und loslassen → System OFF. Wieder aufwecken durch erneuten Druck oder Ladegerät anstecken |
+| Mute (`P0.02`) | schaltet die iBeacon-Aussendung ab; das Gerät bleibt an und meldet weiter den Akkustand — die Tür geht dann nicht mehr automatisch auf |
+| Ack (`P0.27`), User (`P0.10`) | derzeit ohne Funktion |
+
+**LEDs** (beide RGB-Einheiten leuchten immer gleich)
+
+| Anzeige | Bedeutung |
+|---|---|
+| grün, dauerhaft | lädt (Ladegerät steckt) |
+| grün, kurzer Blitz 1×/s | läuft, sendet iBeacon (Normalbetrieb) |
+| rot, kurzer Blitz 1×/s | Mute — läuft, sendet aber keinen iBeacon |
+| orange, kurzer Blitz 3×/s | Akku leer |
+| dunkel | ausgeschaltet |
+
+Die Anzeige-Priorität ist: Laden → Aus → Akku leer → Mute → Normalbetrieb.
+
+---
+
+## Anpassen
+
+Alle relevanten Werte stehen oben in [`src/main.c`](src/main.c):
+
+* `IBEACON_UUID`, `IBEACON_MAJOR`, `IBEACON_MINOR` — müssen **exakt** zur
+  Zonen-Konfiguration des Empfängers passen. Ein Scanner matcht auf UUID *und*
+  Major *und* Minor; passt eines nicht, sieht es aus wie gar kein Beacon.
+  (`1122`/`4455` sind die Defaults aus dem Zephyr-Sample — tauchen die hier
+  wieder auf, hat jemand die echte Identität überschrieben.)
+* `IBEACON_RSSI` — gemessene Signalstärke in 1 m Entfernung. Nur ändern, wenn
+  die Sendeleistung wirklich geändert wurde, sonst schätzen Empfänger die
+  Entfernung falsch.
+* `ADV_INT_MIN` / `ADV_INT_MAX` — Advertising-Intervall, der dominierende
+  Stromverbraucher. Kürzer = die Tür reagiert schneller, aber der Akku hält
+  kürzer.
+* `BATTERY_INTERVAL`, `BTHOME_BURST_MS` — während des BTHome-Bursts ersetzt der
+  Batterie-Frame den iBeacon-Frame, die Türautomatik ist so lange blind.
+
+Die Akku-Kennlinie (NiMH) steckt in [`src/battery.c`](src/battery.c).
+
+Der Produktionsbuild hat UART/Logging abgeschaltet
+([`prj.conf`](prj.conf)). Für Debug-Ausgaben zusätzlich
+[`debug.conf`](debug.conf) einbinden:
+
+```bash
+west build -b distancer . -- -Dibeacon_EXTRA_CONF_FILE=debug.conf
+```
+
+Das Overlay [`boards/distancer.overlay`](boards/distancer.overlay) korrigiert
+den Batterie-Spannungsteiler: auf der rev-3-Hardware ist der im Board-Devicetree
+beschriebene Teiler nicht bestückt, die ADC-Leitung hängt direkt an der
+Batterie.
+
+---
+
+## Lizenz
+
+Apache-2.0. Basiert auf dem Zephyr-iBeacon-Sample
+(© 2018 Henrik Brix Andersen), Erweiterungen © 2026 PHYTEC Messtechnik GmbH.
