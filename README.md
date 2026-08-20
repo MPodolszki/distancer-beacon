@@ -34,9 +34,11 @@ nur die Paketnamen unterscheiden sich.
 * Linux (getestet: Manjaro), Python ≥ 3.10, Git
 * das **distancer-Board** samt DAPLink-Debug-Probe (on-board, meldet sich als
   `0d28:0204 NXP ARM mbed`)
-* Zugriff auf das interne Repository `distancer-dev`
-  (`ssh://git@git.phytec.de/distancer-dev`) — siehe Schritt 2, ohne das geht es
-  nicht
+* eine Internetverbindung für den ersten `west update` (lädt Zephyr und seine
+  Module, ein paar hundert MB)
+
+Mehr braucht es nicht — die Board-Definition liegt in diesem Repository, es wird
+kein weiteres Repo benötigt.
 
 ### 1. Zephyr-Toolchain installieren
 
@@ -65,50 +67,42 @@ source ~/zephyrproject/.venv/bin/activate
 ### 2. Workspace anlegen
 
 Diese Firmware ist eine *Zephyr-Workspace-Anwendung*: sie bringt Zephyr nicht
-selbst mit, sondern lebt neben einem von west verwalteten Zephyr-Baum. Die
-Board-Definition `distancer` steckt außerdem im internen Repository
-`distancer-dev`, das gleichzeitig das west-Manifest stellt.
+selbst mit, sondern lebt neben einem von west verwalteten Zephyr-Baum. Dieses
+Repository ist dabei sein eigenes west-Manifest — `west init -m …` legt den
+Workspace an, `west update` holt Zephyr in der getesteten Revision dazu:
 
 ```bash
-mkdir -p ~/git/distancer-workspace && cd ~/git/distancer-workspace
-git clone ssh://git@git.phytec.de/distancer-dev
-west init -l distancer-dev        # macht distancer-dev zum Manifest-Repo
+west init -m https://github.com/MPodolszki/distancer-beacon.git ~/distancer-ws
+cd ~/distancer-ws
 west update                       # lädt Zephyr + Module (dauert ein paar Minuten)
-west config build.sysbuild true   # sysbuild aktivieren (wie im Original-Workspace)
-git clone git@github.com:MPodolszki/distancer-beacon.git ibeacon
+west config build.sysbuild true   # sysbuild aktivieren (so wurde die Firmware getestet)
 ```
 
 Danach sieht der Workspace so aus:
 
 ```
-distancer-workspace/
-├── .west/            # west-Konfiguration
-├── distancer-dev/    # Manifest-Repo, enthält boards/phytec/distancer
-├── zephyr/           # von west geholt
-├── modules/          # von west geholt
-└── ibeacon/          # ← dieses Repository
+distancer-ws/
+├── .west/                # west-Konfiguration
+├── distancer-beacon/     # ← dieses Repository (Manifest-Repo)
+├── zephyr/               # von west geholt
+└── modules/              # von west geholt
 ```
 
-`distancer-dev` meldet sich über `zephyr/module.yml` als Zephyr-Modul mit
-`board_root: .` an — deshalb findet `west build -b distancer` das Board
+Die Board-Definition `distancer` liegt in diesem Repository unter
+[`boards/phytec/distancer/`](boards/phytec/distancer). Über
+[`zephyr/module.yml`](zephyr/module.yml) meldet sich das Repo als Zephyr-Modul
+mit `board_root: .` an — deshalb findet `west build -b distancer` das Board
 automatisch, ohne dass man `-DBOARD_ROOT=…` angeben muss.
-
-Wer das Repository woanders auschecken will, muss stattdessen den Board-Pfad
-explizit mitgeben:
-
-```bash
-west build -b distancer . -- -DBOARD_ROOT=/pfad/zu/distancer-dev
-```
 
 ### 3. Bauen
 
 ```bash
 source ~/zephyrproject/.venv/bin/activate
-cd ~/git/distancer-workspace/ibeacon
+cd ~/distancer-ws/distancer-beacon
 west build -b distancer .
 ```
 
-Ergebnis: `build/ibeacon/zephyr/zephyr.hex`.
+Ergebnis: `build/distancer-beacon/zephyr/zephyr.hex`.
 
 Nach Konfigurationsänderungen (`prj.conf`, Overlay) sicherheitshalber neu
 aufsetzen:
@@ -130,7 +124,7 @@ west flash --runner pyocd
 Oder an west vorbei:
 
 ```bash
-pyocd flash -e sector -t nrf52832 build/ibeacon/zephyr/zephyr.hex
+pyocd flash -e sector -t nrf52832 build/distancer-beacon/zephyr/zephyr.hex
 ```
 
 Vorher prüfen, ob der Probe überhaupt da ist:
@@ -208,7 +202,7 @@ Der Produktionsbuild hat UART/Logging abgeschaltet
 [`debug.conf`](debug.conf) einbinden:
 
 ```bash
-west build -b distancer . -- -Dibeacon_EXTRA_CONF_FILE=debug.conf
+west build -b distancer . -- -Ddistancer-beacon_EXTRA_CONF_FILE=debug.conf
 ```
 
 Das Overlay [`boards/distancer.overlay`](boards/distancer.overlay) korrigiert
