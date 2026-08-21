@@ -51,13 +51,21 @@ LOG_MODULE_REGISTER(ibeacon, LOG_LEVEL_INF);
 #define IBEACON_MAJOR	1		/* e.g. site / building id      */
 #define IBEACON_MINOR	1		/* e.g. this individual fob id  */
 
-/* Calibrated signal strength (2's complement) measured at 1 m distance.
- * 0xC6 = -58 dBm at the default 0 dBm transmit power. This was briefly raised
- * to 0xCA to match a +4 dBm setting, but that setting turned out to change
- * nothing measurable (see prj.conf), so the original value stands.
- * Re-measure it if the transmit power is ever changed for real, otherwise
- * receivers will estimate the distance incorrectly. */
-#define IBEACON_RSSI	0xc6
+/*
+ * Calibrated signal strength (2's complement) measured at 1 m distance.
+ *
+ * 0xCA = -54 dBm, which is the measured -58 dBm at 0 dBm transmit power
+ * shifted by the +4 dBm the radio now sends with (CONFIG_BT_CTLR_TX_PWR_PLUS_4
+ * in prj.conf). This byte is not what the beacon transmits with - it is what
+ * receivers subtract from the RSSI they see to estimate the distance, so it
+ * has to track the transmit power or every distance estimate is off by the
+ * difference.
+ *
+ * The shift is arithmetic, not measured. If the distance estimate on the
+ * receiver matters, re-measure it: place the fob exactly 1 m from the
+ * receiver, average the reported RSSI over a minute, and put that value here.
+ */
+#define IBEACON_RSSI	0xca
 
 /*
  * Advertising interval. This is the dominant power consumer: every interval
@@ -844,9 +852,15 @@ static void bt_ready(int err)
 		      BATTERY_TRACE_INTERVAL);
 #endif
 
+	/*
+	 * Tx power is logged straight from the controller's own Kconfig value,
+	 * so a debug build states on the console what the radio was built to
+	 * send with instead of leaving it to be inferred from RSSI readings.
+	 */
 	LOG_INF("iBeacon started (UUID 18ee1516-016b-4bec-ad96-bcb96d166e97, "
-		"major %u, minor %u, RSSI@1m %d dBm, adv %u-%u ms)",
+		"major %u, minor %u, Tx %d dBm, RSSI@1m %d dBm, adv %u-%u ms)",
 		(unsigned int)IBEACON_MAJOR, (unsigned int)IBEACON_MINOR,
+		(int)CONFIG_BT_CTLR_TX_PWR_DBM,
 		(int)(int8_t)IBEACON_RSSI,
 		(unsigned int)(ADV_INT_MIN * 625U / 1000U),
 		(unsigned int)(ADV_INT_MAX * 625U / 1000U));

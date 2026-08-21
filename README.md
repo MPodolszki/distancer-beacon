@@ -17,7 +17,8 @@ Eckdaten:
 | Advertising-Intervall | 150–200 ms |
 | Proximity UUID | `18ee1516-016b-4bec-ad96-bcb96d166e97` |
 | Major / Minor | 1 / 1 |
-| Kalibrierter RSSI @ 1 m | `0xC6` = −58 dBm bei 0 dBm Sendeleistung |
+| Sendeleistung | +4 dBm (Maximum des nRF52832) |
+| Kalibrierter RSSI @ 1 m | `0xCA` = −54 dBm (bei +4 dBm Sendeleistung) |
 | Batteriemeldung | BTHome v2, Messung alle 60 s, Sendung bei Änderung (Keep-alive 5 min) |
 | Stromversorgung | NiMH-Pack, Ladung über LTC4060 (Micro-USB) |
 
@@ -195,9 +196,32 @@ Alle relevanten Werte stehen oben in [`src/main.c`](src/main.c):
   Major *und* Minor; passt eines nicht, sieht es aus wie gar kein Beacon.
   (`1122`/`4455` sind die Defaults aus dem Zephyr-Sample — tauchen die hier
   wieder auf, hat jemand die echte Identität überschrieben.)
-* `IBEACON_RSSI` — gemessene Signalstärke in 1 m Entfernung. Nur ändern, wenn
-  die Sendeleistung wirklich geändert wurde, sonst schätzen Empfänger die
-  Entfernung falsch.
+* `IBEACON_RSSI` — gemessene Signalstärke in 1 m Entfernung. Muss der
+  Sendeleistung folgen (`CONFIG_BT_CTLR_TX_PWR_*` in `prj.conf`), sonst
+  schätzen Empfänger die Entfernung falsch — der Wert wird beim Empfänger vom
+  gemessenen RSSI abgezogen.
+
+### Sendeleistung / Reichweite
+
+Die Sendeleistung steht in `prj.conf` auf `CONFIG_BT_CTLR_TX_PWR_PLUS_4=y`.
++4 dBm ist die Obergrenze des nRF52832 — mehr kann der SoC nicht, dafür
+bräuchte die Platine ein Front-End-Modul (PA). Wer die Einstellung anzweifelt,
+prüft sie am Image statt per RSSI-Messung an einem einzelnen Punkt:
+
+```
+arm-zephyr-eabi-objdump -d build/distancer-beacon/zephyr/zephyr.elf \
+    | grep -B1 'bl.*<radio_tx_power_set>'
+```
+
+Erwartet wird `movs r0, #4`; `radio_tx_power_set()` schreibt daraufhin `0x04`
+(`Pos4dBm`) nach `RADIO->TXPOWER`. Ein Debug-Build gibt die Leistung zusätzlich
+beim Start auf der Konsole aus (`Tx 4 dBm`).
+
+Was ohne Hardware-Änderung sonst noch Reichweite bringt, ist nicht die
+Sendeleistung, sondern die Trefferwahrscheinlichkeit: ein kürzeres
+Advertising-Intervall (`ADV_INT_MIN`/`ADV_INT_MAX`) und ein kürzerer
+BTHome-Burst (`BTHOME_BURST_MS`), während dessen der iBeacon-Frame gar nicht
+gesendet wird. Beides kostet Akkulaufzeit.
 * `ADV_INT_MIN` / `ADV_INT_MAX` — Advertising-Intervall, der dominierende
   Stromverbraucher. Kürzer = die Tür reagiert schneller, aber der Akku hält
   kürzer.
