@@ -14,7 +14,7 @@ Eckdaten:
 | | |
 |---|---|
 | MCU | nRF52832 (Board `distancer`, rev 3) |
-| Advertising-Intervall | 150–200 ms |
+| Advertising-Intervall | 100 ms (Apple-Empfehlung für iBeacon) |
 | Proximity UUID | `18ee1516-016b-4bec-ad96-bcb96d166e97` |
 | Major / Minor | 1 / 1 |
 | Sendeleistung | +4 dBm (Maximum des nRF52832) |
@@ -217,14 +217,41 @@ Erwartet wird `movs r0, #4`; `radio_tx_power_set()` schreibt daraufhin `0x04`
 (`Pos4dBm`) nach `RADIO->TXPOWER`. Ein Debug-Build gibt die Leistung zusätzlich
 beim Start auf der Konsole aus (`Tx 4 dBm`).
 
-Was ohne Hardware-Änderung sonst noch Reichweite bringt, ist nicht die
-Sendeleistung, sondern die Trefferwahrscheinlichkeit: ein kürzeres
-Advertising-Intervall (`ADV_INT_MIN`/`ADV_INT_MAX`) und ein kürzerer
-BTHome-Burst (`BTHOME_BURST_MS`), während dessen der iBeacon-Frame gar nicht
-gesendet wird. Beides kostet Akkulaufzeit.
+Was ohne Hardware-Änderung sonst noch hilft, ist nicht die Sendeleistung,
+sondern die Trefferwahrscheinlichkeit — siehe „Erkennungslatenz".
+
+### Erkennungslatenz
+
+Symptom aus Issue #2: das iPhone braucht vor der Tür 3–5 Sekunden, bis der
+Beacon erkannt wird. Drei Stellschrauben wirken darauf, in dieser Reihenfolge:
+
+1. **Advertising-Intervall** (`ADV_INT_MIN`/`ADV_INT_MAX`, aktuell 100 ms).
+   Der Beacon selbst trägt nur eine halbe Intervalllänge zur Latenz bei, also
+   ~50 ms — daher kommen die Sekunden *nicht*. Der eigentliche Faktor ist der
+   Scan-Duty-Cycle von iOS: iOS hört nur in kurzen Fenstern im Sekundenabstand
+   zu, und ein Paket wird nur gesehen, wenn es zufällig in so ein Fenster
+   fällt. Ein kürzeres Intervall verkürzt nicht den iOS-Zeitplan, sondern
+   erhöht die Chance, in jedem einzelnen Fenster getroffen zu werden. Genau
+   deshalb wirkt es trotzdem.
+2. **BTHome-Burst** (`BTHOME_BURST_MS`, aktuell 1 s). Während des Bursts
+   ersetzt der Batterie-Frame den iBeacon-Frame vollständig — die Türautomatik
+   ist so lange komplett blind. Das war mit 3 s die längste zusammenhängende
+   Lücke, die die Firmware selbst erzeugt hat.
+3. **Sendeleistung** (+4 dBm, siehe oben). Wirkt indirekt, aber für diesen
+   Anwendungsfall gar nicht schlecht: je früher der Beacon beim *Zugehen* auf
+   die Tür in Reichweite kommt, desto mehr iOS-Scanfenster liegen noch vor dem
+   Ankommen — die Erkennung ist dann idealerweise schon durch, bevor man
+   überhaupt vor der Tür steht.
+
+Was der Beacon **nicht** beeinflussen kann, ist der Scan-Zeitplan von iOS
+selbst. CoreLocation-Region-Monitoring im Hintergrund braucht typischerweise
+Sekunden; sub-sekündliche Erkennung ist von der Beacon-Seite aus nicht
+erreichbar. Wenn das nicht reicht, liegt der nächste Schritt auf der
+Empfängerseite (z. B. eine App im Vordergrund, die aktiv *ranged*, statt
+passivem Region-Monitoring).
 * `ADV_INT_MIN` / `ADV_INT_MAX` — Advertising-Intervall, der dominierende
   Stromverbraucher. Kürzer = die Tür reagiert schneller, aber der Akku hält
-  kürzer.
+  kürzer. Siehe „Erkennungslatenz" unten.
 * `BATTERY_INTERVAL`, `BTHOME_BURST_MS` — während des BTHome-Bursts ersetzt der
   Batterie-Frame den iBeacon-Frame, die Türautomatik ist so lange blind.
 

@@ -68,21 +68,44 @@ LOG_MODULE_REGISTER(ibeacon, LOG_LEVEL_INF);
 #define IBEACON_RSSI	0xca
 
 /*
- * Advertising interval. This is the dominant power consumer: every interval
- * the radio wakes, starts the crystal and transmits on three channels.
+ * Advertising interval - the main knob for how quickly a phone notices the
+ * beacon, and the dominant power consumer: every interval the radio wakes,
+ * starts the crystal and transmits on all three primary channels.
  *
- *   fast (100-150 ms, the Zephyr sample default) -> ~10 radio events/s
- *   slow (1.00-1.20 s, used here)                -> ~1 radio event/s
+ * Set to 100 ms, which is what Apple's iBeacon guidance recommends.
  *
- * Slow advertising cuts the radio duty cycle by roughly 10x at the cost of
- * detection latency: a passively scanning phone needs correspondingly longer
- * to notice the beacon. If the door reacts too sluggishly, lower this.
+ * What this does and does not buy, because it is easy to expect too much:
+ * the beacon's own contribution to detection latency is only half an
+ * interval on average - 50 ms here, 88 ms at the previous 150-200 ms. That
+ * is not where a multi-second delay comes from. The delay is iOS's
+ * background scan duty cycle, which the beacon cannot control: iOS listens
+ * in short windows spaced seconds apart, and a packet is only seen if it
+ * happens to fall inside one.
+ *
+ * That is exactly why the interval still matters. Shortening it does not
+ * shorten iOS's scan schedule, it raises the chance of being caught in any
+ * single scan window - 1.75x as many packets per window as before - so
+ * fewer of iOS's scan cycles come up empty and detection lands on an
+ * earlier one.
+ *
+ * The legacy spec floor for non-connectable advertising is 100 ms
+ * (Core 4.2 [Vol 2, Part E, 7.8.5]). Zephyr only enforces it for
+ * controllers below HCI 5.0 (see bt_le_adv_param_validate() in
+ * subsys/bluetooth/host/adv.c), so shorter values would be accepted here -
+ * but they leave what scanners are built to expect, and the cost is linear:
+ * 50 ms would double the radio current again for a further 50 ms of
+ * theoretical gain that iOS's scan schedule swallows anyway.
+ *
+ * Power: a rough charge estimate per advertising event is ~20 uC (three
+ * channels of ~376 us payload plus ramp-up, at the +4 dBm transmit current),
+ * so the radio's share goes from ~115 uA at 175 ms to ~200 uA at 100 ms.
+ * Calculated, not measured - if battery life matters, measure it.
  */
 /* Advertising intervals are expressed in 0.625 ms units. */
 #define ADV_INT_UNITS(ms)	((ms) * 1000U / 625U)
 
-#define ADV_INT_MIN	ADV_INT_UNITS(150)		/* 0.15 s */
-#define ADV_INT_MAX	ADV_INT_UNITS(200)		/* 0.20 s */
+#define ADV_INT_MIN	ADV_INT_UNITS(100)		/* 0.10 s */
+#define ADV_INT_MAX	ADV_INT_UNITS(100)		/* 0.10 s */
 
 static const struct bt_le_adv_param adv_param = BT_LE_ADV_PARAM_INIT(
 	BT_LE_ADV_OPT_USE_IDENTITY, ADV_INT_MIN, ADV_INT_MAX, NULL);
@@ -145,10 +168,23 @@ static const struct bt_data ad[] = {
  *
  * The burst has to be long enough for a scanner to catch at least one packet
  * at the advertising interval - a passive scanner misses most of them.
+ *
+ * The burst is therefore sized in packets, not in seconds: it used to be 3 s
+ * to fit ~17 packets at the old 150-200 ms interval. At 100 ms the same
+ * packet count fits in well under half the time, so 1 s (10 packets) is kept
+ * here instead. That is not a cosmetic change - the burst is the only time
+ * the door automation is genuinely blind, and it was the single longest
+ * uninterrupted gap in iBeacon coverage the firmware produced. Walking up to
+ * the door inside that window meant waiting it out, which is a plausible
+ * contributor to the multi-second detections that were reported.
+ *
+ * Do not shorten it much further without checking: below a handful of
+ * packets a passive scanner starts missing whole bursts, and the battery
+ * sensor in Home Assistant goes stale instead.
  */
 #define BATTERY_INTERVAL	K_SECONDS(60)
 #define BTHOME_KEEPALIVE_MS	(5 * 60 * 1000)
-#define BTHOME_BURST_MS		3000
+#define BTHOME_BURST_MS		1000
 
 static uint8_t bthome_svc_data[] = {
 	BTHOME_UUID_LSB, BTHOME_UUID_MSB,
